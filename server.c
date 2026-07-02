@@ -692,4 +692,6 @@ char *recv_expected(int sock, size_t expected_len)
 }
 
 /*Look into creating a general cleanup that on every fail path just checks every potentially allocated thing and if not null set to null.
-s->name, s->major, s, data, recv_buffer, header_buff, also close file and server/client sockets.*/
+s->name, s->major, s, data, recv_buffer, header_buff, also close file and server/client sockets.
+
+VARIABLE_FREES BUT FOR BUFFS! */
