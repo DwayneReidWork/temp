@@ -690,3 +690,6 @@ char *recv_expected(int sock, size_t expected_len)
     recv_buffer[expected_len] = '\0';
     return recv_buffer;
 }
+
+/*Look into creating a general cleanup that on every fail path just checks every potentially allocated thing and if not null set to null.
+s->name, s->major, s, data, recv_buffer, header_buff, also close file and server/client sockets.*/
