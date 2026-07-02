@@ -14,10 +14,10 @@
 #define ERROR -1
 #define SUCCESS 0
 
-void handle_client(int client_socket);
-void variable_frees(int count, ...);
 char *recv_expected(int sock, size_t expected_len);
 int sendall(int sock, char *data, ssize_t data_len);
+void handle_client(int client_socket);
+void variable_frees(int count, ...);
 
 /// @brief Packet Types, Packed for alignment
 typedef enum __attribute__((__packed__))
@@ -39,13 +39,12 @@ typedef struct Student
 /// @brief Struct for packet headers containing PacketType and uint32_t payload
 typedef struct Header
 {
-    /// Packing Struct prevents program from automatically filling blank space. {ex when sending 1 byte and 4 bytes will automacally PAD 3 bytes so its sending 4 byts per section. Packing forces it to only send the exact number of bytes used. Ex: 1a 1 bit header and 4 bit int will be padded to 8 bits but when packed will be sent as 5 bits.}
     PacketType p_type;
-    uint32_t payload;
+    uint32_t payload_len;
 } __attribute__((packed)) Header_t;
 
 /// @brief Database struct containing pointer to Student_t objects and count of students
-typedef struct Databade
+typedef struct Database
 {
     Student_t *Student[MAX_STUDENTS];
     int num_students;
@@ -73,29 +72,30 @@ Student_t *create_student(int id, const char *name, const char *major)
         return NULL;
     }
 
-    Student_t *s = malloc(sizeof(Student_t));
+    Student_t *s = calloc(sizeof(Student_t), 1);
     if (NULL == s)
     {
-        printf("Malloc Failed.\n");
+        printf("Calloc Failed.\n");
         return NULL;
     }
 
     s->id = id;
 
-    s->name = malloc(strlen(name) + 1);
-    if (NULL == name)
+    s->name = calloc(strlen(name) + 1, 1);
+    if (NULL == s->name)
     {
-        printf("Malloc Failed.\n");
+        printf("Calloc Failed.\n");
         // free student because it was allocated
         free(s);
         return NULL;
     }
     strcpy(s->name, name);
 
-    s->major = malloc(strlen(major) + 1);
-    if (NULL == major)
+    s->major = calloc(strlen(major) + 1, 1);
+    if (NULL == s->major)
     {
-        printf("Malloc Failed.\n");
+        printf("Calloc Failed.\n");
+        free(s->name);
         free(s);
         return NULL;
     }
@@ -109,6 +109,12 @@ Student_t *create_student(int id, const char *name, const char *major)
 /// @return student data if found, else NULL
 Student_t *find_student(int id)
 {
+    if (0 == database.num_students)
+    {
+        printf("Database Empty.\n");
+        return NULL;
+    }
+
     for (int i = 0; i < database.num_students; i++)
     {
         if (database.Student[i]->id == id) // check if null before deref
@@ -119,6 +125,8 @@ Student_t *find_student(int id)
     return NULL;
 }
 
+/*
+// NO LONGER NEEDED SINCE READING FROM FILE.
 /// @brief create student database
 void database_setup()
 {
@@ -129,9 +137,10 @@ void database_setup()
     database.Student[database.num_students++] = create_student(1002, "Bob", "Math");
     database.Student[database.num_students++] = create_student(1003, "Carol", "Physics");
 }
+*/
 
 /// @brief free student
-/// @param student Pointer to struct of student name and major and id (id not dynamically allocated)
+/// @param student Pointer to struct of student name and major and id (id not dynamically allocated so not freed)
 void free_student(Student_t *student)
 {
     if (NULL == student)
@@ -197,11 +206,17 @@ void print_database(void)
 
 int save_to_file(Db_t *database)
 {
+    if (NULL == database)
+    {
+        printf("Null database. Nothing to save.\n");
+        return ERROR;
+    }
+
     FILE *save_file = fopen("./students.txt", "wb");
     if (NULL == save_file)
     {
         printf("Error opening file.\n");
-        return -1;
+        return ERROR;
     }
 
     // Save number of students
@@ -225,12 +240,14 @@ int save_to_file(Db_t *database)
         // fwrite(ptr_to_data, size_of_1_element, num_of_elements, output_file)
         fwrite(&name_len, sizeof(uint32_t), 1, save_file);
         // fwrite(ptr_to_data, 1_for_char? [use sizeof(char?)], names_len_of_chars?, output_file)
-        fwrite(s->name, 1, name_len, save_file);
+        // fwrite(s->name, 1, name_len, save_file);
+        fwrite(s->name, sizeof(char), name_len, save_file);
 
         // same for major?
         //  major len then major
         fwrite(&major_len, sizeof(uint32_t), 1, save_file);
-        fwrite(s->major, 1, major_len, save_file);
+        // fwrite(s->major, 1, major_len, save_file);
+        fwrite(s->major, sizeof(char), major_len, save_file);
     }
 
     fclose(save_file);
@@ -247,7 +264,6 @@ int read_from_file()
         return ERROR;
     }
 
-    // TODO read from file instead of hardcode
     int num_students = 0;
     size_t name_len = 0, major_len = 0;
 
@@ -258,40 +274,50 @@ int read_from_file()
     if (1 != fread(&num_students, sizeof(int), 1, file))
     {
         printf("Error reading number of students.\n");
+        fclose(file);
         return ERROR;
     }
     database.num_students = num_students;
 
     for (int i = 0; i < database.num_students; i++)
     {
-        Student_t *s = malloc(sizeof(Student_t));
+        Student_t *s = calloc(sizeof(Student_t), 1);
         if (NULL == s)
         {
             printf("Error allocating space for db.\n");
+            fclose(file);
             return ERROR;
         }
 
         if (1 != fread(&s->id, sizeof(int), 1, file))
         {
             printf("Error reading ID number.\n");
+            free(s);
+            fclose(file);
             return ERROR;
         }
 
         if (1 != fread(&name_len, sizeof(int), 1, file))
         {
             printf("Error reading name length.\n");
+            free(s);
+            fclose(file);
             return ERROR;
         }
 
-        s->name = malloc(name_len + 1); // null terminator?
+        s->name = calloc(name_len + 1, 1); // null terminator?
         if (NULL == s->name)
         {
             printf("Error allocating space for name.\n");
+            free(s);
+            fclose(file);
             return ERROR;
         }
         if (name_len != fread(s->name, sizeof(char), name_len, file))
         {
             printf("Error writing into name.\n");
+            free(s);
+            fclose(file);
             return ERROR;
         }
         s->name[name_len] = '\0';
@@ -299,26 +325,36 @@ int read_from_file()
         if (1 != fread(&major_len, sizeof(int), 1, file))
         {
             printf("Error reading major length.\n");
+            free(s->name);
+            free(s);
+            fclose(file);
             return ERROR;
         }
 
-        s->major = malloc(major_len + 1); // null terminator?
+        s->major = calloc(major_len + 1, 1); // null terminator?
         if (NULL == s->major)
         {
             printf("Error allocating space for major.\n");
+            free(s->name);
+            free(s);
+            fclose(file);
             return ERROR;
         }
         if (major_len != fread(s->major, sizeof(char), major_len, file))
         {
             printf("Error writing into major.\n");
+            free(s->major);
+            free(s->name);
+            free(s);
+            fclose(file);
             return ERROR;
         }
         s->major[major_len] = '\0';
 
         database.Student[i] = s;
-        // feels like a lot of error checking between fread and malloc...
+        // feels like a lot of error checking between fread and calloc...
     }
-
+    fclose(file);
     return SUCCESS;
 }
 
@@ -356,7 +392,7 @@ int connection_setup()
     }
 
     // Listen for connections
-    if (listen(server_socket, 5) == -1)
+    if (-1 == listen(server_socket, 5))
     {
         printf("Listen failed\n");
         close(server_socket);
@@ -369,7 +405,7 @@ int connection_setup()
     while (1)
     {
         client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_size);
-        if (client_socket == -1)
+        if (-1 == client_socket)
         {
             perror("Client connection failed");
             continue;
@@ -403,12 +439,16 @@ void handle_client(int client_socket)
         {
             return;
         }
-        memcpy(&header.p_type, header_buff, 1);
+        memcpy(&header.p_type, header_buff, sizeof(header.p_type));
         printf("Packet Type: %u\n", header.p_type);
+        // FIX THE OFFSET (2ND VARIABLE)
+        memcpy(&header.payload_len, header_buff + sizeof(header.p_type), sizeof(header.payload_len));
+        header.payload_len = ntohl(header.payload_len);
+        printf("Payload Len: %u\n", header.payload_len);
+        free(header_buff);
         // can't do this (below) since i'm only recving 1 byte and then switching on that move below printf into the specific switch case!!!!!!!
         // printf("Payload (Network order): %u\n", header.payload);
         //  END OF PROBLEM AREA
-        size_t msg_len = 0;
         int response_len = 0, space_needed = 0, space_calculated = 0;
 
         switch (header.p_type)
@@ -418,69 +458,70 @@ void handle_client(int client_socket)
             Issue with current packet setup. When recieving multi-part data like name_len then name and major_len then major that first num gets stored as the payload in the header which is managable but only if I know thats what that first bit of data is like for case 1 that number is the len of the name but for case 2 thats the entire student ID and case 3 its just "0000" because disconnect has no real 'payload'.
             */
             printf("Inside case 1.\n");
-
-            // figuring out the secondary/tertiary offsets was the biggest issue
-            memcpy(&header.payload, header_buff + 1, 4);
-            // TODO AI Assisted Get help
-            header.payload = ntohl(header.payload);
-            printf("%d\n", header.payload);
-            // This was an issue realizing I can't get name len because its already in header.payload so starting from name.
-            char *name_buff = recv_expected(client_socket, header.payload);
-            if (NULL == name_buff)
+            char *data = recv_expected(client_socket, header.payload_len);
+            if (NULL == data)
             {
                 return;
             }
-            char *name = malloc(header.payload + 1);
+
+            // To move through buffer
+            size_t offset = 0;
+
+            // Name length
+            uint32_t name_len;
+            memcpy(&name_len, data + offset, sizeof(uint32_t));
+            name_len = ntohl(name_len);
+            // update offet
+            offset += sizeof(uint32_t);
+
+            // Name
+            char *name = calloc(name_len + 1, 1);
             if (NULL == name)
             {
-                variable_frees(1, name_buff);
+                free(data);
                 return;
             }
-            memcpy(name, name_buff, header.payload);
-            name[header.payload] = '\0';
-            printf("Name: %s\n", name);
+            memcpy(name, data + offset, name_len);
+            name[name_len] = '\0';
+            // update offset
+            offset += name_len;
 
-            uint32_t major_len = 0;
-            char *major_len_buff = recv_expected(client_socket, 4);
-
-            memcpy(&major_len, major_len_buff, 4);
+            // Major length
+            uint32_t major_len;
+            memcpy(&major_len, data + offset, sizeof(uint32_t));
             major_len = ntohl(major_len);
+            // update offset
+            offset += sizeof(uint32_t);
 
-            printf("Major Len: %d\n", major_len);
-
-            char *major_buff = recv_expected(client_socket, major_len);
-            if (NULL == major_buff)
-            {
-                variable_frees(2, name_buff, name);
-                return;
-            }
-
-            char *major = malloc(major_len + 1);
+            // Major
+            char *major = calloc(major_len + 1, 1);
             if (NULL == major)
             {
-                variable_frees(3, major_buff, name_buff, name);
+                variable_frees(2, data, name);
+                return;
             }
-            memcpy(major, major_buff, major_len);
+            memcpy(major, data + offset, major_len);
             major[major_len] = '\0';
+            // update offset
+            offset += major_len;
 
+            printf("Name: %s\n", name);
             printf("Major: %s\n", major);
 
-            // Add new person to database
             int student_ID = 1001 + database.num_students;
+            database.Student[database.num_students++] =
+                create_student(student_ID, name, major);
 
-            database.Student[database.num_students++] = create_student(student_ID, name, major);
+            variable_frees(3, data, name, major);
 
             print_database();
 
-            variable_frees(4, major_buff, name_buff, major, name);
-
-            // END AI
-            // TODO add name and major to databse and send back auto generated ID [id will just be last id in database +1]
+            // TODO Edit this to send back name and major added and the ID number
             char *mesg = "Recieved data to add";
-            msg_len = strlen(mesg);
+            ssize_t msg_len = strlen(mesg);
             Header_t add_reply = {0};
             add_reply.p_type = ADD_STUDENT;
-            add_reply.payload = htonl(msg_len);
+            add_reply.payload_len = htonl(msg_len);
             sendall(client_socket, (char *)&add_reply, sizeof(Header_t));
             sendall(client_socket, mesg, msg_len);
             printf("Add reply sent.\n");
@@ -491,9 +532,15 @@ void handle_client(int client_socket)
 
         case 2:
             printf("Inside case 2.\n");
-            memcpy(&header.payload, header_buff + 1, 4);
-            header.payload = ntohl(header.payload);
-            Student_t *s = find_student(header.payload);
+            data = recv_expected(client_socket, header.payload_len);
+            if (NULL == data)
+            {
+                return;
+            }
+            uint32_t s_ID = 0;
+            memcpy(&s_ID, data, sizeof(uint32_t));
+            s_ID = ntohl(s_ID);
+            Student_t *s = find_student(s_ID);
             char *msg = NULL;
 
             // Prints to become send packets as replies to client
@@ -511,7 +558,7 @@ void handle_client(int client_socket)
                 space_calculated = 8 + sizeof(int) + strlen(s->name) + strlen(s->major);
                 printf("Space Calculated: %d\nSpace needed: %d\n", space_calculated, space_needed);
 
-                msg = malloc(space_needed + 1);
+                msg = calloc(space_needed + 1, 1);
 
                 snprintf(msg, space_needed + 1, "FOUND:%d,%s,%s",
                          s->id,
@@ -521,20 +568,22 @@ void handle_client(int client_socket)
             else
             {
                 space_needed = snprintf(NULL, 0, "NOT_FOUND");
-                msg = malloc(space_needed + 1);
+                msg = calloc(space_needed + 1, 1);
                 snprintf(msg, space_needed + 1, "NOT_FOUND");
             }
             // END PROBLEM AREA!!!
             msg_len = strlen(msg);
             Header_t search_reply = {0};
             search_reply.p_type = SEARCH_STUDENT;
-            search_reply.payload = htonl(msg_len);
+            search_reply.payload_len = htonl(msg_len);
 
             // send header data
             sendall(client_socket, (char *)&search_reply, sizeof(Header_t));
             // send data
             sendall(client_socket, msg, msg_len);
             printf("Search Response Sent.\n");
+            free(data);
+            free(msg);
             break;
         case 3:
             printf("Inside save case:\n");
@@ -550,7 +599,7 @@ void handle_client(int client_socket)
             msg_len = strlen(msg);
             Header_t save_reply = {0};
             save_reply.p_type = SAVE;
-            save_reply.payload = htonl(msg_len);
+            save_reply.payload_len = htonl(msg_len);
 
             // send header data
             sendall(client_socket, (char *)&save_reply, sizeof(Header_t));
@@ -566,6 +615,8 @@ void handle_client(int client_socket)
             response_len = sizeof(shutdown_reply);
             sendall(client_socket, (char *)&shutdown_reply, response_len);
             // Find a more graceful way to kill program.
+            database_cleanup();
+            close(client_socket);
             exit(EXIT_SUCCESS);
         default:
             printf("Invalid packet type\n");
@@ -576,11 +627,7 @@ void handle_client(int client_socket)
 int main()
 {
     read_from_file();
-    print_database();
-    // database_setup();
-
     connection_setup();
-
     database_cleanup();
     return SUCCESS;
 }
@@ -616,7 +663,7 @@ int sendall(int sock, char *data, ssize_t data_len)
 char *recv_expected(int sock, size_t expected_len)
 {
     // buffer for data
-    char *recv_buffer = malloc(expected_len);
+    char *recv_buffer = calloc(expected_len + 1, 1);
 
     if (NULL == recv_buffer)
     {
@@ -639,7 +686,7 @@ char *recv_expected(int sock, size_t expected_len)
         }
         total_recvd += bytes_recvd;
     }
-    // null terminalt buffer
+    // null terminate buffer
     recv_buffer[expected_len] = '\0';
     return recv_buffer;
 }
